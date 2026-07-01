@@ -1,5 +1,5 @@
 ﻿// Polling endpoint — checks for new comments on media linked to active rules
-// Uses Apify Instagram API to read comments
+// Uses RapidAPI Instagram API to read comments
 // Uses instagram-private-api to write replies and DMs
 
 import {
@@ -10,7 +10,7 @@ import {
   markProcessed,
   updateSettings,
   supabase,
-} from "./apify-client.js";
+} from "./rapidapi-client.js";
 
 async function processComments() {
   // Get all active rules

@@ -1,5 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
-import { getMediaInfo, resolveMediaId, updateSettings } from "./apify-client.js";
+import { getMediaInfo, resolveMediaId, updateSettings } from "./rapidapi-client.js";
 
 // Validate required environment variables
 if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
