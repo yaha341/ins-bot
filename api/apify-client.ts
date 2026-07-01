@@ -17,7 +17,9 @@ const APIFY_TOKEN = process.env.APIFY_API_TOKEN;
 
 // Instagram scraper actor ID (official Apify actor)
 const INSTAGRAM_SCRAPER_ACTOR = "apify/instagram-scraper";
-const INSTAGRAM_COMMENT_SCRAPER_ACTOR = "apify/instagram-comment-scraper";
+
+// We'll use the main scraper to get both posts and comments
+// No need for separate comment scraper
 
 if (!APIFY_TOKEN) {
   console.warn("[Apify] No APIFY_API_TOKEN found. Instagram features will not work.");
@@ -98,10 +100,19 @@ export async function getComments(postUrl: string): Promise<ApifyComment[]> {
   }
 
   try {
-    console.log("[Apify] Starting actor:", INSTAGRAM_COMMENT_SCRAPER_ACTOR);
-    const results = await runActor(INSTAGRAM_COMMENT_SCRAPER_ACTOR, {
+    console.log("[Apify] Starting actor:", INSTAGRAM_SCRAPER_ACTOR);
+
+    // Use main instagram-scraper to get post WITH comments
+    const results = await runActor(INSTAGRAM_SCRAPER_ACTOR, {
       directUrls: [postUrl],
-      resultsLimit: 100, // Get last 100 comments
+      resultsType: "posts",
+      resultsLimit: 1,
+      addParentData: false,
+      enhanceUserSearchWithFacebookPage: false,
+      isUserTaggedFeedURL: false,
+      onlyPostsNewerThan: "",
+      scrapePostComments: true, // KEY: Enable comment scraping
+      scrapePostCommentsCount: 100, // Get up to 100 comments
     });
 
     console.log("[Apify] Actor completed, results:", JSON.stringify(results).slice(0, 500));
@@ -114,11 +125,12 @@ export async function getComments(postUrl: string): Promise<ApifyComment[]> {
     // Transform Apify format to our format
     const comments: ApifyComment[] = [];
 
-    for (const item of results) {
-      if (item.comments && Array.isArray(item.comments)) {
-        for (const comment of item.comments) {
+    // instagram-scraper returns post data with latestComments array
+    for (const post of results) {
+      if (post.latestComments && Array.isArray(post.latestComments)) {
+        for (const comment of post.latestComments) {
           comments.push({
-            id: comment.id || comment.commentId || String(Date.now()),
+            id: comment.id || String(Date.now() + Math.random()),
             text: comment.text || "",
             ownerUsername: comment.ownerUsername || comment.username || "unknown",
             ownerId: comment.ownerId || comment.userId || "unknown",
