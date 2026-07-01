@@ -15,10 +15,11 @@ const supabase = createClient(
 const APIFY_API_BASE = "https://api.apify.com/v2";
 const APIFY_TOKEN = process.env.APIFY_API_TOKEN;
 
-// Instagram scraper actor ID (your actor)
-const INSTAGRAM_SCRAPER_ACTOR = "harmonious_tear/my-actor";
+// Instagram scraper actor ID - using tilde format for Apify Store actors
+const INSTAGRAM_SCRAPER_ACTOR = "apify~instagram-scraper";
 
-// We'll use your actor to get posts and comments
+// Alternative: can also use full actor ID if the above doesn't work
+// const INSTAGRAM_SCRAPER_ACTOR = "Uz0Mrp42TmkGG6kWX"; // Instagram Scraper actor ID
 
 if (!APIFY_TOKEN) {
   console.warn("[Apify] No APIFY_API_TOKEN found. Instagram features will not work.");
