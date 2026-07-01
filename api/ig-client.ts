@@ -37,6 +37,9 @@ export async function getLoggedInClient() {
   const username = settings.username || process.env.IG_USERNAME;
   if (!username) throw new Error("No IG username configured");
 
+  console.log("[IG] Using username:", username);
+  console.log("[IG] Username source:", settings.username ? "from database" : "from env");
+
   client.state.generateDevice(username);
 
   // Try to restore session
@@ -63,6 +66,8 @@ export async function getLoggedInClient() {
   if (!password) throw new Error("No IG password in env (IG_PASSWORD)");
 
   console.log("[IG] Attempting fresh login for username:", username);
+  console.log("[IG] Password length:", password.length, "characters");
+  console.log("[IG] Password first 3 chars:", password.substring(0, 3) + "***");
 
   try {
     await client.simulate.preLoginFlow();
@@ -85,19 +90,38 @@ export async function getLoggedInClient() {
 
     return { client, username, loggedIn };
   } catch (e: any) {
-    console.error("[IG] Login failed:", e?.message || e);
+    console.error("[IG] Login failed - Full error:", JSON.stringify(e, null, 2));
+    console.error("[IG] Error message:", e?.message);
+    console.error("[IG] Error response:", e?.response?.body);
 
     // Provide more detailed error message
     let errorMsg = "Instagram login failed";
+
+    // Check response body for detailed error
+    const responseBody = e?.response?.body;
+    if (responseBody) {
+      console.error("[IG] Instagram API response:", JSON.stringify(responseBody, null, 2));
+
+      if (responseBody.two_factor_required) {
+        errorMsg = "Instagram требует 2FA. Отключите двухфакторную аутентификацию.";
+      } else if (responseBody.error_type === "bad_password") {
+        errorMsg = "Неверный пароль Instagram. Попробуйте сбросить пароль и создать новый.";
+      } else if (responseBody.invalid_user) {
+        errorMsg = "Пользователь не найден. Проверьте username (без символа @).";
+      } else if (responseBody.message) {
+        errorMsg = `Instagram API: ${responseBody.message}`;
+      }
+    }
+
     if (e?.message?.includes("challenge_required")) {
       errorMsg = "Instagram требует подтверждение через email/SMS. Войдите через браузер сначала.";
     } else if (e?.message?.includes("checkpoint_required")) {
       errorMsg = "Instagram заблокировал вход. Пройдите проверку через официальное приложение.";
-    } else if (e?.message?.includes("password")) {
+    } else if (e?.message?.includes("password") && !responseBody) {
       errorMsg = "Неверный пароль Instagram. Проверьте переменную IG_PASSWORD в настройках Vercel.";
-    } else if (e?.message?.includes("user")) {
+    } else if (e?.message?.includes("user") && !responseBody) {
       errorMsg = "Пользователь не найден. Проверьте имя пользователя.";
-    } else if (e?.message) {
+    } else if (e?.message && !responseBody) {
       errorMsg = e.message;
     }
 
