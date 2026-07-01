@@ -1,5 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
-import { getLoggedInClient, updateSettings, resolveMediaId, getMediaInfo } from "./ig-client.js";
+import { getMediaInfo, resolveMediaIdFromUrl, clearConnection, getAccessToken } from "./graph.js";
 
 // Validate required environment variables
 if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
@@ -118,30 +118,15 @@ export default async function handler(req: any, res: any) {
     return res.json(data ?? { is_connected: false });
   }
 
-  // IG connect
+  // IG connect - now redirects to OAuth
   if (req.method === "POST" && req.query.action === "ig_connect") {
-    const { username } = req.body || {};
-    if (!username) return res.status(400).json({ error: "Username required" });
-
-    await updateSettings({ username, is_connected: false, last_error: null });
-
-    try {
-      await getLoggedInClient();
-      return res.json({ ok: true, message: "Подключено успешно!" });
-    } catch (e: any) {
-      await updateSettings({ is_connected: false, last_error: e?.message || "Login failed" });
-      return res.status(400).json({ error: e?.message || "Не удалось подключиться к Instagram" });
-    }
+    const redirectUrl = `/api/oauth?action=start`;
+    return res.json({ redirect: redirectUrl });
   }
 
   // IG disconnect
   if (req.method === "POST" && req.query.action === "ig_disconnect") {
-    await updateSettings({
-      username: null,
-      session: null,
-      is_connected: false,
-      last_error: null,
-    });
+    await clearConnection();
     return res.json({ ok: true });
   }
 
@@ -152,8 +137,15 @@ export default async function handler(req: any, res: any) {
 
     try {
       console.log("[Admin] Resolving media ID for URL:", url);
-      const { client } = await getLoggedInClient();
-      const mediaId = await resolveMediaId(client, url);
+
+      // Check if we have access token
+      try {
+        await getAccessToken();
+      } catch (e) {
+        return res.status(400).json({ error: "Instagram не подключен. Подключите аккаунт в настройках." });
+      }
+
+      const mediaId = await resolveMediaIdFromUrl(url);
 
       if (!mediaId) {
         return res.status(400).json({ error: "Не удалось определить Media ID по этой ссылке" });
@@ -163,17 +155,14 @@ export default async function handler(req: any, res: any) {
 
       let title = "";
       try {
-        const info = await getMediaInfo(client, mediaId);
-        const caption = (info as any)?.items?.[0]?.caption?.text;
+        const info = await getMediaInfo(mediaId);
+        const caption = info?.caption;
         if (caption) {
           title = caption.slice(0, 100);
         }
       } catch (e) {
         console.log("[Admin] Could not fetch media title:", e);
       }
-
-      // Update settings to mark successful connection
-      await updateSettings({ is_connected: true, last_error: null });
 
       return res.json({ media_id: mediaId, media_title: title });
     } catch (e: any) {
@@ -186,29 +175,26 @@ export default async function handler(req: any, res: any) {
   if (req.method === "POST" && req.query.action === "test_ig_connection") {
     try {
       console.log("[Admin] Testing IG connection...");
-      const { client, username } = await getLoggedInClient();
+      const accessToken = await getAccessToken();
 
       // Try to get current user info
-      const user = await client.account.currentUser();
+      const response = await fetch(
+        `https://graph.facebook.com/v21.0/me?fields=id,name&access_token=${accessToken}`
+      );
 
-      await updateSettings({
-        is_connected: true,
-        last_error: null,
-        username: username
-      });
+      const data = await response.json();
+
+      if (data.error) {
+        throw new Error(data.error.message);
+      }
 
       return res.json({
         ok: true,
         message: "Подключение успешно",
-        username: username,
-        user_id: user.pk
+        user_id: data.id
       });
     } catch (e: any) {
       console.error("[Admin] test_ig_connection error:", e?.message || e);
-      await updateSettings({
-        is_connected: false,
-        last_error: e?.message || "Connection test failed"
-      });
       return res.status(400).json({ error: e?.message || "Тест подключения не удался" });
     }
   }

@@ -308,7 +308,6 @@ function RuleEditor({ rule, onSave, onClose, showToast }: {
 /* ====== IG CONNECTION PANEL ====== */
 function IgConnectionPanel({ showToast }: { showToast: (msg: string, type: "success" | "error") => void }) {
   const [status, setStatus] = useState<IgStatus | null>(null);
-  const [username, setUsername] = useState("");
   const [connecting, setConnecting] = useState(false);
   const [testing, setTesting] = useState(false);
   const [error, setError] = useState("");
@@ -317,14 +316,30 @@ function IgConnectionPanel({ showToast }: { showToast: (msg: string, type: "succ
     getIgStatus().then(setStatus).catch(() => {
       showToast("Не удалось загрузить статус Instagram", "error");
     });
+
+    // Check if just connected via OAuth
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("connected") === "true") {
+      showToast("Instagram успешно подключен!", "success");
+      window.history.replaceState({}, "", window.location.pathname);
+      // Refresh status
+      getIgStatus().then(setStatus);
+    }
   }, [showToast]);
 
   async function handleConnect() {
-    if (!username.trim()) return;
     setConnecting(true);
     setError("");
     try {
-      await igConnect(username.trim());
+      const result = await igConnect("");
+
+      // If OAuth flow, redirect to OAuth URL
+      if (result.redirect) {
+        window.location.href = result.redirect;
+        return;
+      }
+
+      // Legacy flow (shouldn't happen with new code)
       const s = await getIgStatus();
       setStatus(s);
       showToast("Instagram подключён успешно", "success");
@@ -368,7 +383,7 @@ function IgConnectionPanel({ showToast }: { showToast: (msg: string, type: "succ
   const isConnected = status?.is_connected;
 
   return (
-    <div className="card" style={{ maxWidth: 500 }}>
+    <div className="card" style={{ maxWidth: 600 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
         <span style={{ fontSize: 28 }}>{isConnected ? "✅" : "🔌"}</span>
         <div>
@@ -378,7 +393,7 @@ function IgConnectionPanel({ showToast }: { showToast: (msg: string, type: "succ
           <div style={{ fontSize: 13, color: "var(--text-muted)" }}>
             {isConnected
               ? `@${status.username}`
-              : "Подключите аккаунт для работы бота"
+              : "Подключите аккаунт через Meta Graph API"
             }
           </div>
         </div>
@@ -416,21 +431,26 @@ function IgConnectionPanel({ showToast }: { showToast: (msg: string, type: "succ
         </>
       ) : (
         <div className="stack-sm">
-          <div>
-            <label className="label">Логин Instagram</label>
-            <input
-              className="input"
-              placeholder="username"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-            />
-            <p className="hint">
-              Пароль укажите в переменной IG_PASSWORD в настройках Vercel
-            </p>
+          <div style={{
+            padding: "12px",
+            background: "var(--bg-secondary)",
+            borderRadius: 8,
+            fontSize: 13,
+            marginBottom: 12
+          }}>
+            <div style={{ fontWeight: 600, marginBottom: 8 }}>📋 Требования:</div>
+            <ul style={{ margin: 0, paddingLeft: 20 }}>
+              <li>Instagram Business или Creator аккаунт</li>
+              <li>Facebook Page привязанная к Instagram</li>
+              <li>Facebook App (я помогу настроить)</li>
+            </ul>
           </div>
-          <button className="btn btn-primary btn-sm" onClick={handleConnect} disabled={connecting}>
-            {connecting ? "Подключаюсь..." : "Подключить"}
+          <button className="btn btn-primary" onClick={handleConnect} disabled={connecting}>
+            {connecting ? "Перенаправление..." : "🔗 Подключить через Facebook"}
           </button>
+          <p className="hint">
+            Вы будете перенаправлены на Facebook для авторизации
+          </p>
         </div>
       )}
     </div>
