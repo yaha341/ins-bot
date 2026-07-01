@@ -151,12 +151,15 @@ export default async function handler(req: any, res: any) {
     if (!url) return res.status(400).json({ error: "URL required" });
 
     try {
+      console.log("[Admin] Resolving media ID for URL:", url);
       const { client } = await getLoggedInClient();
       const mediaId = await resolveMediaId(client, url);
 
       if (!mediaId) {
         return res.status(400).json({ error: "Не удалось определить Media ID по этой ссылке" });
       }
+
+      console.log("[Admin] Media ID resolved:", mediaId);
 
       let title = "";
       try {
@@ -165,11 +168,48 @@ export default async function handler(req: any, res: any) {
         if (caption) {
           title = caption.slice(0, 100);
         }
-      } catch {}
+      } catch (e) {
+        console.log("[Admin] Could not fetch media title:", e);
+      }
+
+      // Update settings to mark successful connection
+      await updateSettings({ is_connected: true, last_error: null });
 
       return res.json({ media_id: mediaId, media_title: title });
     } catch (e: any) {
+      console.error("[Admin] resolve_media_id error:", e?.message || e);
       return res.status(400).json({ error: e?.message || "Ошибка при определении Media ID" });
+    }
+  }
+
+  // Test IG connection
+  if (req.method === "POST" && req.query.action === "test_ig_connection") {
+    try {
+      console.log("[Admin] Testing IG connection...");
+      const { client, username } = await getLoggedInClient();
+
+      // Try to get current user info
+      const user = await client.account.currentUser();
+
+      await updateSettings({
+        is_connected: true,
+        last_error: null,
+        username: username
+      });
+
+      return res.json({
+        ok: true,
+        message: "Подключение успешно",
+        username: username,
+        user_id: user.pk
+      });
+    } catch (e: any) {
+      console.error("[Admin] test_ig_connection error:", e?.message || e);
+      await updateSettings({
+        is_connected: false,
+        last_error: e?.message || "Connection test failed"
+      });
+      return res.status(400).json({ error: e?.message || "Тест подключения не удался" });
     }
   }
 

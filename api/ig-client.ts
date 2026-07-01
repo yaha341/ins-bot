@@ -46,11 +46,14 @@ export async function getLoggedInClient() {
       // Verify session is still valid
       try {
         await client.account.currentUser();
+        console.log("[IG] Session restored successfully for", username);
         return { client, username };
-      } catch {
+      } catch (e: any) {
+        console.log("[IG] Stored session expired or invalid:", e?.message);
         // session expired, fall through to login
       }
-    } catch {
+    } catch (e: any) {
+      console.log("[IG] Failed to deserialize session:", e?.message);
       // bad session, fall through
     }
   }
@@ -59,23 +62,48 @@ export async function getLoggedInClient() {
   const password = process.env.IG_PASSWORD;
   if (!password) throw new Error("No IG password in env (IG_PASSWORD)");
 
-  await client.simulate.preLoginFlow();
-  const loggedIn = await client.account.login(username, password);
-  await client.simulate.postLoginFlow();
+  console.log("[IG] Attempting fresh login for username:", username);
 
-  // Save session
-  const serialized = client.state.serialize();
-  await supabase
-    .from("ig_settings")
-    .update({
-      session: serialized,
-      is_connected: true,
-      last_error: null,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", 1);
+  try {
+    await client.simulate.preLoginFlow();
+    const loggedIn = await client.account.login(username, password);
+    await client.simulate.postLoginFlow();
 
-  return { client, username, loggedIn };
+    console.log("[IG] Login successful");
+
+    // Save session
+    const serialized = await client.state.serialize();
+    await supabase
+      .from("ig_settings")
+      .update({
+        session: serialized,
+        is_connected: true,
+        last_error: null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", 1);
+
+    return { client, username, loggedIn };
+  } catch (e: any) {
+    console.error("[IG] Login failed:", e?.message || e);
+
+    // Provide more detailed error message
+    let errorMsg = "Instagram login failed";
+    if (e?.message?.includes("challenge_required")) {
+      errorMsg = "Instagram требует подтверждение через email/SMS. Войдите через браузер сначала.";
+    } else if (e?.message?.includes("checkpoint_required")) {
+      errorMsg = "Instagram заблокировал вход. Пройдите проверку через официальное приложение.";
+    } else if (e?.message?.includes("password")) {
+      errorMsg = "Неверный пароль Instagram. Проверьте переменную IG_PASSWORD в настройках Vercel.";
+    } else if (e?.message?.includes("user")) {
+      errorMsg = "Пользователь не найден. Проверьте имя пользователя.";
+    } else if (e?.message) {
+      errorMsg = e.message;
+    }
+
+    await updateSettings({ last_error: errorMsg, is_connected: false });
+    throw new Error(errorMsg);
+  }
 }
 
 // Extract shortcode from Instagram URL (e.g. https://www.instagram.com/reel/ABC123/ -> ABC123)

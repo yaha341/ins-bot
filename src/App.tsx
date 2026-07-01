@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import {
   checkAuth, login as apiLogin, logout as apiLogout,
   listRules, saveRule, deleteRule, toggleRule,
-  listTriggers, getIgStatus, igConnect, igDisconnect, resolveMediaId,
+  listTriggers, getIgStatus, igConnect, igDisconnect, resolveMediaId, testIgConnection,
   type Rule, type Trigger, type IgStatus,
 } from "./api";
 
@@ -310,6 +310,7 @@ function IgConnectionPanel({ showToast }: { showToast: (msg: string, type: "succ
   const [status, setStatus] = useState<IgStatus | null>(null);
   const [username, setUsername] = useState("");
   const [connecting, setConnecting] = useState(false);
+  const [testing, setTesting] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -333,6 +334,23 @@ function IgConnectionPanel({ showToast }: { showToast: (msg: string, type: "succ
       showToast(msg, "error");
     } finally {
       setConnecting(false);
+    }
+  }
+
+  async function handleTest() {
+    setTesting(true);
+    setError("");
+    try {
+      const result = await testIgConnection();
+      showToast(result.message || "Подключение работает", "success");
+      const s = await getIgStatus();
+      setStatus(s);
+    } catch (e: any) {
+      const msg = e.message || "Тест подключения не удался";
+      setError(msg);
+      showToast(msg, "error");
+    } finally {
+      setTesting(false);
     }
   }
 
@@ -387,9 +405,14 @@ function IgConnectionPanel({ showToast }: { showToast: (msg: string, type: "succ
               </div>
             )}
           </div>
-          <button className="btn btn-danger btn-sm" onClick={handleDisconnect}>
-            Отключить
-          </button>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button className="btn btn-primary btn-sm" onClick={handleTest} disabled={testing}>
+              {testing ? "Тестирую..." : "🧪 Тест подключения"}
+            </button>
+            <button className="btn btn-danger btn-sm" onClick={handleDisconnect}>
+              Отключить
+            </button>
+          </div>
         </>
       ) : (
         <div className="stack-sm">

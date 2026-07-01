@@ -96,3 +96,7 @@ export async function igDisconnect() {
 export async function resolveMediaId(url: string): Promise<{ media_id: string; media_title: string }> {
   return api("resolve_media_id", "POST", { url });
 }
+
+export async function testIgConnection(): Promise<{ ok: boolean; message: string; username?: string; user_id?: string }> {
+  return api("test_ig_connection", "POST");
+}
