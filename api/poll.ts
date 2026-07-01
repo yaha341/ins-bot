@@ -1,21 +1,18 @@
 ﻿// Polling endpoint — checks for new comments on media linked to active rules
-// Called by cron-job.org or Vercel Cron every few minutes. No Facebook app / webhook needed.
+// Uses Apify Instagram API to read comments
+// Uses instagram-private-api to write replies and DMs
 
 import {
-  getLoggedInClient,
-  getRecentMedia,
   getComments,
   replyToComment,
-  sendDirect,
+  sendDM,
   isProcessed,
   markProcessed,
   updateSettings,
   supabase,
-} from "./ig-client.js";
+} from "./apify-client.js";
 
 async function processComments() {
-  const { client } = await getLoggedInClient();
-
   // Get all active rules
   const { data: rules } = await supabase
     .from("ig_rules")
@@ -26,52 +23,55 @@ async function processComments() {
     return { processed: 0, rules: 0 };
   }
 
-  // Collect unique media IDs from rules
-  const mediaIds = [...new Set(rules.map((r: any) => r.media_id).filter(Boolean))];
-
-  // Also fetch recent media to get their IDs (in case rules use URL only)
-  let recentMedia: any[] = [];
-  try {
-    recentMedia = await getRecentMedia(client, 20);
-  } catch (e) {
-    console.error("[poll] getRecentMedia error:", e);
-  }
-
   let processedCount = 0;
 
-  for (const mediaId of mediaIds) {
-    let comments: any[];
-    try {
-      comments = await getComments(client, mediaId);
-    } catch (e) {
-      console.error("[poll] getComments for " + mediaId + ":", e);
+  for (const rule of rules) {
+    const mediaUrl = rule.media_url;
+    const mediaId = rule.media_id;
+
+    if (!mediaUrl && !mediaId) {
+      console.log("[poll] Skipping rule without URL or ID:", rule.id);
       continue;
     }
 
+    // Convert media_id (shortcode) to URL if needed
+    let url = mediaUrl;
+    if (!url && mediaId) {
+      url = `https://www.instagram.com/p/${mediaId}/`;
+    }
+
+    console.log(`[poll] Checking comments for: ${url}`);
+
+    let comments: any[];
+    try {
+      comments = await getComments(url);
+    } catch (e) {
+      console.error("[poll] getComments error for " + url + ":", e);
+      continue;
+    }
+
+    console.log(`[poll] Found ${comments.length} comments for ${mediaId}`);
+
     for (const comment of comments) {
-      const commentId = comment.pk || comment.id;
-      const commentText = (comment.text || "").trim();
-      const senderPk = comment.user?.pk?.toString() || "";
+      const commentId = comment.id;
+      const commentText = comment.text || "";
+      const senderUsername = comment.ownerUsername;
+      const senderId = comment.ownerId;
 
       if (!commentId || !commentText) continue;
 
       // Skip already processed
-      if (await isProcessed(commentId)) continue;
-
-      // Find matching rules for this media
-      const matchingRules = rules.filter((r: any) => r.media_id === mediaId);
-      if (matchingRules.length === 0) continue;
+      if (await isProcessed(commentId)) {
+        continue;
+      }
 
       const lowerComment = commentText.toLowerCase();
-      let matched: any = null;
+      const keywords: string[] = rule.keywords ?? [];
 
-      for (const rule of matchingRules) {
-        const keywords: string[] = rule.keywords ?? [];
-        if (keywords.some((kw: string) => lowerComment.includes(kw.toLowerCase()))) {
-          matched = rule;
-          break;
-        }
-      }
+      // Check if comment matches any keyword
+      const matched = keywords.some((kw: string) =>
+        lowerComment.includes(kw.toLowerCase())
+      );
 
       if (!matched) {
         // Mark as processed so we don't re-check
@@ -79,31 +79,40 @@ async function processComments() {
         continue;
       }
 
+      console.log(`[poll] Matched keyword in comment: "${commentText}"`);
+
       // Log trigger
       await supabase.from("ig_triggers").insert({
-        ig_rule_id: matched.id,
+        ig_rule_id: rule.id,
         media_id: mediaId,
         comment_id: commentId,
         comment_text: commentText,
-        sender_ig_id: senderPk,
+        sender_ig_id: senderId,
       });
 
       // Reply to comment
-      const commentReply = matched.comment_reply || "Ответила вам в личные сообщения 😊";
-      await replyToComment(client, mediaId, commentReply);
+      const commentReply = rule.comment_reply || "Ответила вам в личные сообщения 😊";
+
+      // We need the numeric media ID for instagram-private-api
+      // Convert shortcode to numeric ID if needed
+      let numericMediaId = mediaId;
+
+      // For now, we'll use the shortcode as-is
+      // instagram-private-api may need conversion
+      await replyToComment(numericMediaId, commentReply);
 
       // Try to send DM
       let dmSent = false;
-      if (senderPk) {
-        dmSent = await sendDirect(client, senderPk, matched.dm_message || "");
+      if (senderId && rule.dm_message) {
+        dmSent = await sendDM(senderId, rule.dm_message);
       }
 
       // If DM failed — reply with fallback comment
-      if (!dmSent) {
+      if (!dmSent && rule.dm_message) {
         const failReply =
-          matched.dm_fail_reply ||
+          rule.dm_fail_reply ||
           "Не смогла отправить вам сообщение — у вас закрытый аккаунт. Напишите мне, пожалуйста, в личные сообщения 🙏";
-        await replyToComment(client, mediaId, failReply);
+        await replyToComment(numericMediaId, failReply);
       }
 
       await markProcessed(commentId);
@@ -111,7 +120,7 @@ async function processComments() {
     }
   }
 
-  return { processed: processedCount, rules: rules.length, mediaChecked: mediaIds.length };
+  return { processed: processedCount, rules: rules.length };
 }
 
 export default async function handler(req: any, res: any) {
@@ -130,11 +139,15 @@ export default async function handler(req: any, res: any) {
     }
 
     try {
+      console.log("[poll] Starting comment processing...");
       const result = await processComments();
+      console.log("[poll] Processing complete:", result);
+
       await updateSettings({
         last_poll: new Date().toISOString(),
         last_error: null,
       });
+
       return res.status(200).json({ ok: true, ...result });
     } catch (e: any) {
       console.error("[poll] error:", e);

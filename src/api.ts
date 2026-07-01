@@ -85,7 +85,7 @@ export async function getIgStatus(): Promise<IgStatus> {
   return api("ig_status");
 }
 
-export async function igConnect(username: string): Promise<{ ok?: boolean; message?: string; redirect?: string }> {
+export async function igConnect(username: string): Promise<{ ok: boolean; message: string }> {
   return api("ig_connect", "POST", { username });
 }
 

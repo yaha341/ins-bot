@@ -308,6 +308,7 @@ function RuleEditor({ rule, onSave, onClose, showToast }: {
 /* ====== IG CONNECTION PANEL ====== */
 function IgConnectionPanel({ showToast }: { showToast: (msg: string, type: "success" | "error") => void }) {
   const [status, setStatus] = useState<IgStatus | null>(null);
+  const [username, setUsername] = useState("");
   const [connecting, setConnecting] = useState(false);
   const [testing, setTesting] = useState(false);
   const [error, setError] = useState("");
@@ -316,30 +317,14 @@ function IgConnectionPanel({ showToast }: { showToast: (msg: string, type: "succ
     getIgStatus().then(setStatus).catch(() => {
       showToast("Не удалось загрузить статус Instagram", "error");
     });
-
-    // Check if just connected via OAuth
-    const params = new URLSearchParams(window.location.search);
-    if (params.get("connected") === "true") {
-      showToast("Instagram успешно подключен!", "success");
-      window.history.replaceState({}, "", window.location.pathname);
-      // Refresh status
-      getIgStatus().then(setStatus);
-    }
   }, [showToast]);
 
   async function handleConnect() {
+    if (!username.trim()) return;
     setConnecting(true);
     setError("");
     try {
-      const result = await igConnect("");
-
-      // If OAuth flow, redirect to OAuth URL
-      if (result.redirect) {
-        window.location.href = result.redirect;
-        return;
-      }
-
-      // Legacy flow (shouldn't happen with new code)
+      await igConnect(username.trim());
       const s = await getIgStatus();
       setStatus(s);
       showToast("Instagram подключён успешно", "success");
@@ -392,8 +377,8 @@ function IgConnectionPanel({ showToast }: { showToast: (msg: string, type: "succ
           </div>
           <div style={{ fontSize: 13, color: "var(--text-muted)" }}>
             {isConnected
-              ? `@${status.username}`
-              : "Подключите аккаунт через Meta Graph API"
+              ? `@${status.username} (через Apify API)`
+              : "Подключите аккаунт для работы бота"
             }
           </div>
         </div>
@@ -438,19 +423,29 @@ function IgConnectionPanel({ showToast }: { showToast: (msg: string, type: "succ
             fontSize: 13,
             marginBottom: 12
           }}>
-            <div style={{ fontWeight: 600, marginBottom: 8 }}>📋 Требования:</div>
+            <div style={{ fontWeight: 600, marginBottom: 8 }}>ℹ️ Используется Apify API</div>
             <ul style={{ margin: 0, paddingLeft: 20 }}>
-              <li>Instagram Business или Creator аккаунт</li>
-              <li>Facebook Page привязанная к Instagram</li>
-              <li>Facebook App (я помогу настроить)</li>
+              <li>Не нужен Facebook App или OAuth</li>
+              <li>Просто укажите Instagram username</li>
+              <li>Требуется APIFY_API_TOKEN и IG_PASSWORD в Vercel</li>
             </ul>
           </div>
+          <div>
+            <label className="label">Instagram Username</label>
+            <input
+              className="input"
+              placeholder="username"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handleConnect()}
+            />
+            <p className="hint">
+              Пароль укажите в переменной IG_PASSWORD в настройках Vercel
+            </p>
+          </div>
           <button className="btn btn-primary" onClick={handleConnect} disabled={connecting}>
-            {connecting ? "Перенаправление..." : "🔗 Подключить через Facebook"}
+            {connecting ? "Подключаю..." : "Подключить"}
           </button>
-          <p className="hint">
-            Вы будете перенаправлены на Facebook для авторизации
-          </p>
         </div>
       )}
     </div>

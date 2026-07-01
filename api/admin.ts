@@ -1,5 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
-import { getMediaInfo, resolveMediaIdFromUrl, clearConnection, getAccessToken } from "./graph.js";
+import { getMediaInfo, resolveMediaId, updateSettings } from "./apify-client.js";
 
 // Validate required environment variables
 if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
@@ -118,15 +118,22 @@ export default async function handler(req: any, res: any) {
     return res.json(data ?? { is_connected: false });
   }
 
-  // IG connect - now redirects to OAuth
+  // IG connect - simple username setup (no OAuth needed for Apify)
   if (req.method === "POST" && req.query.action === "ig_connect") {
-    const redirectUrl = `/api/oauth?action=start`;
-    return res.json({ redirect: redirectUrl });
+    const { username } = req.body || {};
+    if (!username) return res.status(400).json({ error: "Username required" });
+
+    await updateSettings({ username, is_connected: true, last_error: null });
+    return res.json({ ok: true, message: "Instagram подключен" });
   }
 
   // IG disconnect
   if (req.method === "POST" && req.query.action === "ig_disconnect") {
-    await clearConnection();
+    await updateSettings({
+      username: null,
+      is_connected: false,
+      last_error: null,
+    });
     return res.json({ ok: true });
   }
 
@@ -138,14 +145,7 @@ export default async function handler(req: any, res: any) {
     try {
       console.log("[Admin] Resolving media ID for URL:", url);
 
-      // Check if we have access token
-      try {
-        await getAccessToken();
-      } catch (e) {
-        return res.status(400).json({ error: "Instagram не подключен. Подключите аккаунт в настройках." });
-      }
-
-      const mediaId = await resolveMediaIdFromUrl(url);
+      const mediaId = await resolveMediaId(url);
 
       if (!mediaId) {
         return res.status(400).json({ error: "Не удалось определить Media ID по этой ссылке" });
@@ -155,10 +155,9 @@ export default async function handler(req: any, res: any) {
 
       let title = "";
       try {
-        const info = await getMediaInfo(mediaId);
-        const caption = info?.caption;
-        if (caption) {
-          title = caption.slice(0, 100);
+        const info = await getMediaInfo(url);
+        if (info?.caption) {
+          title = info.caption.slice(0, 100);
         }
       } catch (e) {
         console.log("[Admin] Could not fetch media title:", e);
@@ -171,27 +170,33 @@ export default async function handler(req: any, res: any) {
     }
   }
 
-  // Test IG connection
+  // Test IG connection (for Apify, just check if credentials are set)
   if (req.method === "POST" && req.query.action === "test_ig_connection") {
     try {
       console.log("[Admin] Testing IG connection...");
-      const accessToken = await getAccessToken();
 
-      // Try to get current user info
-      const response = await fetch(
-        `https://graph.facebook.com/v21.0/me?fields=id,name&access_token=${accessToken}`
-      );
+      if (!process.env.APIFY_API_TOKEN) {
+        throw new Error("APIFY_API_TOKEN не настроен в переменных окружения");
+      }
 
-      const data = await response.json();
+      if (!process.env.IG_PASSWORD) {
+        throw new Error("IG_PASSWORD не настроен (нужен для отправки ответов)");
+      }
 
-      if (data.error) {
-        throw new Error(data.error.message);
+      const { data: settings } = await supabase
+        .from("ig_settings")
+        .select("username")
+        .eq("id", 1)
+        .single();
+
+      if (!settings?.username) {
+        throw new Error("Instagram username не настроен");
       }
 
       return res.json({
         ok: true,
-        message: "Подключение успешно",
-        user_id: data.id
+        message: "Подключение готово к работе",
+        username: settings.username
       });
     } catch (e: any) {
       console.error("[Admin] test_ig_connection error:", e?.message || e);
