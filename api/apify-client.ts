@@ -92,11 +92,19 @@ async function runActor(actorId: string, input: any): Promise<any> {
 export async function getComments(postUrl: string): Promise<ApifyComment[]> {
   console.log("[Apify] Getting comments for:", postUrl);
 
+  if (!APIFY_TOKEN) {
+    console.error("[Apify] APIFY_API_TOKEN not set!");
+    return [];
+  }
+
   try {
+    console.log("[Apify] Starting actor:", INSTAGRAM_COMMENT_SCRAPER_ACTOR);
     const results = await runActor(INSTAGRAM_COMMENT_SCRAPER_ACTOR, {
       directUrls: [postUrl],
       resultsLimit: 100, // Get last 100 comments
     });
+
+    console.log("[Apify] Actor completed, results:", JSON.stringify(results).slice(0, 500));
 
     if (!Array.isArray(results)) {
       console.error("[Apify] Invalid results format:", results);
@@ -122,8 +130,8 @@ export async function getComments(postUrl: string): Promise<ApifyComment[]> {
 
     console.log(`[Apify] Found ${comments.length} comments`);
     return comments;
-  } catch (e) {
-    console.error("[Apify] getComments error:", e);
+  } catch (e: any) {
+    console.error("[Apify] getComments error:", e?.message || e);
     return [];
   }
 }
