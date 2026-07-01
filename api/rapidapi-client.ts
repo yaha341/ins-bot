@@ -1,5 +1,5 @@
-// RapidAPI Instagram client
-// Uses Instagram Bulk Profile Scraper API from RapidAPI
+// Apify Instagram client
+// Uses Instagram Comments Scraper actor from Apify
 
 import { createClient } from "@supabase/supabase-js";
 import { IgApiClient } from "instagram-private-api";
@@ -13,81 +13,97 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
-const RAPIDAPI_KEY = process.env.RAPIDAPI_KEY;
-const RAPIDAPI_HOST = "instagram-api-20240.p.rapidapi.com";
-
-interface RapidComment {
-  id: string;
-  text: string;
-  owner: {
-    username: string;
-    id: string;
-  };
-  created_at: number;
-}
+const APIFY_TOKEN = process.env.APIFY_API_TOKEN;
+const APIFY_API_BASE = "https://api.apify.com/v2";
+const INSTAGRAM_COMMENTS_ACTOR = "apify/instagram-comment-scraper";
 
 // Get comments for a post by URL
 export async function getComments(postUrl: string): Promise<any[]> {
-  console.log("[RapidAPI] Getting comments for:", postUrl);
+  console.log("[Apify] Getting comments for:", postUrl);
 
-  if (!RAPIDAPI_KEY) {
-    console.error("[RapidAPI] RAPIDAPI_KEY not set!");
+  if (!APIFY_TOKEN) {
+    console.error("[Apify] APIFY_API_TOKEN not set!");
     return [];
   }
-
-  // Extract shortcode from URL
-  const match = postUrl.match(/\/(p|reel|tv)\/([A-Za-z0-9_-]+)/);
-  if (!match) {
-    console.error("[RapidAPI] Could not extract shortcode from URL:", postUrl);
-    return [];
-  }
-
-  const shortcode = match[2];
-  console.log("[RapidAPI] Shortcode:", shortcode);
 
   try {
-    // Get post comments via Instagram API 2024
-    const response = await fetch(
-      `https://${RAPIDAPI_HOST}/post/comments?shortcode=${shortcode}`,
+    // Start actor run
+    const runResponse = await fetch(
+      `${APIFY_API_BASE}/acts/${INSTAGRAM_COMMENTS_ACTOR}/runs?token=${APIFY_TOKEN}`,
       {
-        method: "GET",
-        headers: {
-          "x-rapidapi-key": RAPIDAPI_KEY,
-          "x-rapidapi-host": RAPIDAPI_HOST,
-        },
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          directUrls: [postUrl],
+          maxComments: 100,
+        }),
       }
     );
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error("[RapidAPI] HTTP error:", response.status, response.statusText, errorText);
+    if (!runResponse.ok) {
+      const errorText = await runResponse.text();
+      console.error("[Apify] Failed to start actor:", runResponse.status, errorText);
       return [];
     }
 
-    const data = await response.json();
-    console.log("[RapidAPI] Response:", JSON.stringify(data).slice(0, 500));
+    const runData = await runResponse.json();
+    const runId = runData.data.id;
+    console.log("[Apify] Actor run started:", runId);
 
-    // Instagram API 2024 returns { data: { comments: [...] } }
-    const commentsList = data?.data?.comments || data?.comments || [];
+    // Wait for completion (poll every 2 seconds, max 60 seconds)
+    let attempts = 0;
+    let status = "RUNNING";
 
-    if (!Array.isArray(commentsList)) {
-      console.error("[RapidAPI] Invalid response format:", data);
+    while (status === "RUNNING" && attempts < 30) {
+      await new Promise(resolve => setTimeout(resolve, 2000));
+
+      const statusResponse = await fetch(
+        `${APIFY_API_BASE}/actor-runs/${runId}?token=${APIFY_TOKEN}`
+      );
+
+      if (!statusResponse.ok) {
+        console.error("[Apify] Failed to check status");
+        break;
+      }
+
+      const statusData = await statusResponse.json();
+      status = statusData.data.status;
+      console.log(`[Apify] Run status: ${status} (attempt ${attempts + 1}/30)`);
+
+      attempts++;
+    }
+
+    if (status !== "SUCCEEDED") {
+      console.error("[Apify] Actor run did not succeed:", status);
       return [];
     }
+
+    // Get dataset items
+    const datasetId = runData.data.defaultDatasetId;
+    const datasetResponse = await fetch(
+      `${APIFY_API_BASE}/datasets/${datasetId}/items?token=${APIFY_TOKEN}`
+    );
+
+    if (!datasetResponse.ok) {
+      console.error("[Apify] Failed to get dataset");
+      return [];
+    }
+
+    const items = await datasetResponse.json();
+    console.log(`[Apify] Retrieved ${items.length} comments`);
 
     // Transform to our format
-    const comments = commentsList.map((comment: any) => ({
-      id: comment.id || comment.pk || String(Date.now() + Math.random()),
-      text: comment.text || "",
-      ownerUsername: comment.owner?.username || comment.user?.username || "unknown",
-      ownerId: comment.owner?.id || comment.user?.id || "unknown",
-      timestamp: comment.created_at ? new Date(comment.created_at * 1000).toISOString() : new Date().toISOString(),
+    const comments = items.map((item: any) => ({
+      id: item.id || item.commentId || String(Date.now() + Math.random()),
+      text: item.text || "",
+      ownerUsername: item.ownerUsername || "unknown",
+      ownerId: item.ownerId || "unknown",
+      timestamp: item.timestamp || new Date().toISOString(),
     }));
 
-    console.log(`[RapidAPI] Found ${comments.length} comments`);
     return comments;
   } catch (e: any) {
-    console.error("[RapidAPI] getComments error:", e?.message || e);
+    console.error("[Apify] getComments error:", e?.message || e);
     return [];
   }
 }
@@ -104,40 +120,78 @@ export async function getMediaInfo(url: string) {
   const shortcode = await resolveMediaId(url);
   if (!shortcode) return null;
 
-  console.log("[RapidAPI] Getting media info for:", shortcode);
+  console.log("[Apify] Getting media info for:", shortcode);
 
-  if (!RAPIDAPI_KEY) {
-    console.error("[RapidAPI] RAPIDAPI_KEY not set!");
+  if (!APIFY_TOKEN) {
+    console.error("[Apify] APIFY_API_TOKEN not set!");
     return null;
   }
 
   try {
-    const response = await fetch(
-      `https://${RAPIDAPI_HOST}/post/info?shortcode=${shortcode}`,
+    // Use the same comments actor to get post info
+    const runResponse = await fetch(
+      `${APIFY_API_BASE}/acts/${INSTAGRAM_COMMENTS_ACTOR}/runs?token=${APIFY_TOKEN}`,
       {
-        method: "GET",
-        headers: {
-          "x-rapidapi-key": RAPIDAPI_KEY,
-          "x-rapidapi-host": RAPIDAPI_HOST,
-        },
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          directUrls: [url],
+          maxComments: 1, // Just need post info, not all comments
+        }),
       }
     );
 
-    if (!response.ok) {
-      console.error("[RapidAPI] HTTP error:", response.status);
+    if (!runResponse.ok) {
+      console.error("[Apify] Failed to start actor");
       return null;
     }
 
-    const data = await response.json();
-    const postData = data?.data || data;
+    const runData = await runResponse.json();
+    const runId = runData.data.id;
 
-    return {
-      id: postData.code || shortcode,
-      caption: postData.caption?.text || postData.caption || "",
-      url: url,
-    };
+    // Wait for completion
+    let attempts = 0;
+    let status = "RUNNING";
+
+    while (status === "RUNNING" && attempts < 15) {
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      const statusResponse = await fetch(
+        `${APIFY_API_BASE}/actor-runs/${runId}?token=${APIFY_TOKEN}`
+      );
+      if (statusResponse.ok) {
+        const statusData = await statusResponse.json();
+        status = statusData.data.status;
+      }
+      attempts++;
+    }
+
+    if (status !== "SUCCEEDED") {
+      return null;
+    }
+
+    // Get dataset
+    const datasetId = runData.data.defaultDatasetId;
+    const datasetResponse = await fetch(
+      `${APIFY_API_BASE}/datasets/${datasetId}/items?token=${APIFY_TOKEN}`
+    );
+
+    if (!datasetResponse.ok) {
+      return null;
+    }
+
+    const items = await datasetResponse.json();
+    if (items.length > 0) {
+      const item = items[0];
+      return {
+        id: shortcode,
+        caption: item.postCaption || item.caption || "",
+        url: url,
+      };
+    }
+
+    return { id: shortcode, caption: "", url: url };
   } catch (e: any) {
-    console.error("[RapidAPI] getMediaInfo error:", e?.message || e);
+    console.error("[Apify] getMediaInfo error:", e?.message || e);
     return null;
   }
 }

@@ -170,13 +170,13 @@ export default async function handler(req: any, res: any) {
     }
   }
 
-  // Test IG connection (for RapidAPI, check if credentials are set)
+  // Test IG connection (for Apify, check if credentials are set)
   if (req.method === "POST" && req.query.action === "test_ig_connection") {
     try {
       console.log("[Admin] Testing IG connection...");
 
-      if (!process.env.RAPIDAPI_KEY) {
-        throw new Error("RAPIDAPI_KEY не настроен в переменных окружения");
+      if (!process.env.APIFY_API_TOKEN) {
+        throw new Error("APIFY_API_TOKEN не настроен в переменных окружения");
       }
 
       if (!process.env.IG_PASSWORD) {
