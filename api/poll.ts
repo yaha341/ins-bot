@@ -11,7 +11,7 @@ import {
   markProcessed,
   updateSettings,
   supabase,
-} from "./ig-client";
+} from "./ig-client.js";
 
 async function processComments() {
   const { client } = await getLoggedInClient();

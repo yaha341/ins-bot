@@ -1,5 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
-import { getLoggedInClient, updateSettings, resolveMediaId, getMediaInfo } from "./ig-client";
+import { getLoggedInClient, updateSettings, resolveMediaId, getMediaInfo } from "./ig-client.js";
 
 // Validate required environment variables
 if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
