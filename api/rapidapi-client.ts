@@ -14,7 +14,7 @@ const supabase = createClient(
 );
 
 const RAPIDAPI_KEY = process.env.RAPIDAPI_KEY;
-const RAPIDAPI_HOST = "instagram-bulk-profile-scrapper.p.rapidapi.com";
+const RAPIDAPI_HOST = "instagram-api-20240.p.rapidapi.com";
 
 interface RapidComment {
   id: string;
@@ -46,37 +46,41 @@ export async function getComments(postUrl: string): Promise<any[]> {
   console.log("[RapidAPI] Shortcode:", shortcode);
 
   try {
-    // Get post comments via RapidAPI
+    // Get post comments via Instagram API 2024
     const response = await fetch(
-      `https://${RAPIDAPI_HOST}/clients/api/ig/media_comments?code_or_id_or_url=${shortcode}&amount=100`,
+      `https://${RAPIDAPI_HOST}/post/comments?shortcode=${shortcode}`,
       {
         method: "GET",
         headers: {
-          "X-RapidAPI-Key": RAPIDAPI_KEY,
-          "X-RapidAPI-Host": RAPIDAPI_HOST,
+          "x-rapidapi-key": RAPIDAPI_KEY,
+          "x-rapidapi-host": RAPIDAPI_HOST,
         },
       }
     );
 
     if (!response.ok) {
-      console.error("[RapidAPI] HTTP error:", response.status, response.statusText);
+      const errorText = await response.text();
+      console.error("[RapidAPI] HTTP error:", response.status, response.statusText, errorText);
       return [];
     }
 
     const data = await response.json();
     console.log("[RapidAPI] Response:", JSON.stringify(data).slice(0, 500));
 
-    if (!data || !Array.isArray(data)) {
-      console.error("[RapidAPI] Invalid response format");
+    // Instagram API 2024 returns { data: { comments: [...] } }
+    const commentsList = data?.data?.comments || data?.comments || [];
+
+    if (!Array.isArray(commentsList)) {
+      console.error("[RapidAPI] Invalid response format:", data);
       return [];
     }
 
     // Transform to our format
-    const comments = data.map((comment: any) => ({
-      id: comment.pk || comment.id || String(Date.now() + Math.random()),
+    const comments = commentsList.map((comment: any) => ({
+      id: comment.id || comment.pk || String(Date.now() + Math.random()),
       text: comment.text || "",
-      ownerUsername: comment.user?.username || "unknown",
-      ownerId: comment.user?.pk || comment.user?.id || "unknown",
+      ownerUsername: comment.owner?.username || comment.user?.username || "unknown",
+      ownerId: comment.owner?.id || comment.user?.id || "unknown",
       timestamp: comment.created_at ? new Date(comment.created_at * 1000).toISOString() : new Date().toISOString(),
     }));
 
@@ -109,12 +113,12 @@ export async function getMediaInfo(url: string) {
 
   try {
     const response = await fetch(
-      `https://${RAPIDAPI_HOST}/clients/api/ig/media_info_v2?code_or_id_or_url=${shortcode}`,
+      `https://${RAPIDAPI_HOST}/post/info?shortcode=${shortcode}`,
       {
         method: "GET",
         headers: {
-          "X-RapidAPI-Key": RAPIDAPI_KEY,
-          "X-RapidAPI-Host": RAPIDAPI_HOST,
+          "x-rapidapi-key": RAPIDAPI_KEY,
+          "x-rapidapi-host": RAPIDAPI_HOST,
         },
       }
     );
@@ -125,9 +129,11 @@ export async function getMediaInfo(url: string) {
     }
 
     const data = await response.json();
+    const postData = data?.data || data;
+
     return {
-      id: data.code || shortcode,
-      caption: data.caption?.text || "",
+      id: postData.code || shortcode,
+      caption: postData.caption?.text || postData.caption || "",
       url: url,
     };
   } catch (e: any) {
