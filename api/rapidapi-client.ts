@@ -15,7 +15,7 @@ const supabase = createClient(
 
 const APIFY_TOKEN = process.env.APIFY_API_TOKEN;
 const APIFY_API_BASE = "https://api.apify.com/v2";
-const INSTAGRAM_COMMENTS_ACTOR = "apify/instagram-comment-scraper";
+const INSTAGRAM_COMMENTS_ACTOR = "apify~instagram-comment-scraper";
 
 // Get comments for a post by URL
 export async function getComments(postUrl: string): Promise<any[]> {
