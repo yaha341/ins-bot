@@ -1,5 +1,5 @@
 ﻿// Polling endpoint — checks for new comments on media linked to active rules
-// Uses RapidAPI Instagram API to read comments
+// Uses Apify Instagram Comments Scraper to read comments
 // Uses instagram-private-api to write replies and DMs
 
 import {
